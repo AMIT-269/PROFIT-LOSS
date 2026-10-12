@@ -249,6 +249,12 @@ private fun MainScreen() {
                     }
                 }
                 else -> {
+                    val dailyGroups = trades.groupBy { it.date }.toSortedMap()
+                    var cumulativeBalance = 0.0
+                    val dailyRows = dailyGroups.map { (day, dayTrades) ->
+                        cumulativeBalance += net(dayTrades)
+                        Triple(day, dayTrades, cumulativeBalance)
+                    }.reversed()
                     LazyColumn(Modifier.fillMaxSize().padding(padding), contentPadding = PaddingValues(16.dp), verticalArrangement = Arrangement.spacedBy(13.dp)) {
                         item {
                             Text("Reports & balance", fontSize = 22.sp, fontWeight = FontWeight.Bold, color = Ink)
@@ -288,12 +294,14 @@ private fun MainScreen() {
                             }
                         }
                         item { Text("DAILY RUNNING TOTAL", color = Muted, fontSize = 12.sp, fontWeight = FontWeight.ExtraBold, letterSpacing = 1.sp) }
-                        items(trades.groupBy { it.date }.toSortedMap().entries.toList().reversed(), key = { it.key }) { entry ->
-                            val dailyNet = net(entry.value)
+                        items(dailyRows, key = { it.first }) { row ->
+                            val dayTrades = row.second
+                            val dailyNet = net(dayTrades)
                             Row(Modifier.fillMaxWidth().background(Color.White, RoundedCornerShape(16.dp)).padding(15.dp), verticalAlignment = Alignment.CenterVertically) {
                                 Column(Modifier.weight(1f)) {
-                                    Text(showDate(entry.key), color = Ink, fontWeight = FontWeight.Bold)
-                                    Text(entry.value.size.toString() + " trades • brokerage " + cash(entry.value.sumOf { it.brokeragePaid }), color = Muted, fontSize = 11.sp)
+                                    Text(showDate(row.first), color = Ink, fontWeight = FontWeight.Bold)
+                                    Text(dayTrades.size.toString() + " trades • brokerage " + cash(dayTrades.sumOf { it.brokeragePaid }), color = Muted, fontSize = 11.sp)
+                                    Text("Running balance " + signed(row.third), color = Purple, fontSize = 11.sp, fontWeight = FontWeight.SemiBold)
                                 }
                                 Text(signed(dailyNet), color = if (dailyNet < 0) Red else Green, fontWeight = FontWeight.ExtraBold)
                             }

@@ -81,13 +81,13 @@ class MainActivity : ComponentActivity() {
 @Composable
 private fun ProfitLossRoot() {
     val context = LocalContext.current
-    var signedInUid by remember { mutableStateOf(FirebaseApp.getApps(context).firstOrNull()?.let { FirebaseAuth.getInstance(it).currentUser?.uid }) }
+    var signedInUid by remember { mutableStateOf(FirebaseApp.getApps(context).firstOrNull()?.let { app -> FirebaseAuth.getInstance(app).currentUser?.takeUnless { user -> user.isAnonymous }?.uid }) }
     if (FirebaseApp.getApps(context).isEmpty()) {
         MaterialTheme(colorScheme = lightColorScheme(primary = Blue)) {
             Column(Modifier.fillMaxSize().padding(24.dp), verticalArrangement = Arrangement.Center, horizontalAlignment = Alignment.CenterHorizontally) {
                 Text("Firebase setup required", fontSize = 22.sp, fontWeight = FontWeight.Bold, color = Navy)
                 Spacer(Modifier.height(10.dp))
-                Text("Add app/google-services.json from your Firebase project, then enable Phone Authentication and Cloud Firestore.", color = Muted)
+                Text("Add app/google-services.json from your Firebase project, then enable Email/Password Authentication and Cloud Firestore.", color = Muted)
             }
         }
     } else if (signedInUid == null) {

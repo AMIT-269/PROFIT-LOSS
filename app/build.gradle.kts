@@ -8,8 +8,6 @@ if (file("google-services.json").exists()) {
     apply(plugin = "com.google.gms.google-services")
 }
 
-}
-
 android {
     namespace = "com.amit.profitloss"
     compileSdk = 35

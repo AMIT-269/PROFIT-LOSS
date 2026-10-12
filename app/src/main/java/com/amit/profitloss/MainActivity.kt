@@ -133,7 +133,7 @@ private fun MainScreen() {
                             }
                             DateButton(date) {
                                 val d = LocalDate.parse(date)
-                                DatePickerDialog(context, { _, y, m, day -> date = LocalDate.of(y, m + 1, day).format(iso) }, d.year, d.monthValue - 1, d.dayOfMonth).show()
+                                DatePickerDialog(context, { _, y, m, day -> val selected = LocalDate.of(y, m + 1, day).format(iso); date = selected; formDate = selected }, d.year, d.monthValue - 1, d.dayOfMonth).show()
                             }
                         }
                     }
@@ -172,7 +172,7 @@ private fun MainScreen() {
                                     Spacer(Modifier.height(5.dp))
                                     OutlinedButton(onClick = {
                                         val d = LocalDate.parse(formDate)
-                                        DatePickerDialog(context, { _, y, m, day -> formDate = LocalDate.of(y, m + 1, day).format(iso) }, d.year, d.monthValue - 1, d.dayOfMonth).show()
+                                        DatePickerDialog(context, { _, y, m, day -> val selected = LocalDate.of(y, m + 1, day).format(iso); formDate = selected; date = selected }, d.year, d.monthValue - 1, d.dayOfMonth).show()
                                     }, modifier = Modifier.fillMaxWidth(), contentPadding = PaddingValues(6.dp), shape = RoundedCornerShape(13.dp)) {
                                         Icon(Icons.Default.CalendarMonth, null, modifier = Modifier.size(15.dp))
                                         Spacer(Modifier.width(4.dp))

@@ -99,7 +99,17 @@ private fun ProfitLossRoot() {
 @Composable
 private fun MainScreen(uid: String, onSignOut: () -> Unit) {
     val context = LocalContext.current
-    val prefs = remember(uid) { context.getSharedPreferences("trade_store_$uid", Context.MODE_PRIVATE) }
+    val prefs = remember(uid) {
+        val accountPrefs = context.getSharedPreferences("trade_store_$uid", Context.MODE_PRIVATE)
+        if (!accountPrefs.contains("trades")) {
+            val legacyPrefs = context.getSharedPreferences("trade_store", Context.MODE_PRIVATE)
+            if (legacyPrefs.contains("trades")) {
+                accountPrefs.edit().putString("trades", legacyPrefs.getString("trades", "[]")).apply()
+                legacyPrefs.edit().remove("trades").apply()
+            }
+        }
+        accountPrefs
+    }
     var trades by remember { mutableStateOf(readTrades(prefs)) }
     var date by remember { mutableStateOf(LocalDate.now().format(iso)) }
     var tab by remember { mutableIntStateOf(0) }

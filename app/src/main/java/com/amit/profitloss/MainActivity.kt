@@ -5,6 +5,8 @@ import android.os.Bundle
 import android.content.Context
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.core.splashscreen.SplashScreen.Companion.installSplashScreen
 import com.google.firebase.FirebaseApp
 import com.google.firebase.auth.FirebaseAuth
@@ -119,6 +121,38 @@ private fun MainScreen(uid: String, onSignOut: () -> Unit) {
     var formDate by remember { mutableStateOf(date) }
     var editingId by remember { mutableStateOf<String?>(null) }
     var error by remember { mutableStateOf("") }
+    val csvExportLauncher = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("text/csv")) { uri ->
+        if (uri != null) {
+            runCatching {
+                val ordered = trades.sortedWith(compareBy<Trade> { it.date }.thenBy { trades.indexOf(it) })
+                val csv = buildString {
+                    appendLine("Date,Trade No,Profit,Loss,Brokerage,Net Result")
+                    ordered.forEach { t ->
+                        val number = trades.filter { it.date == t.date }.indexOf(t) + 1
+                        appendLine("${t.date},$number,${t.profit},${t.loss},${t.brokerage},${t.net}")
+                    }
+                }
+                context.contentResolver.openOutputStream(uri)?.bufferedWriter()?.use { it.write(csv) }
+            }.onSuccess { error = "CSV export completed." }.onFailure { error = "CSV export failed: ${it.localizedMessage}" }
+        }
+    }
+    val backupExportLauncher = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("application/json")) { uri ->
+        if (uri != null) {
+            runCatching { context.contentResolver.openOutputStream(uri)?.bufferedWriter()?.use { it.write(tradesToJson(trades)) } }
+                .onSuccess { error = "JSON backup saved." }.onFailure { error = "Backup failed: ${it.localizedMessage}" }
+        }
+    }
+    val backupImportLauncher = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+        if (uri != null) {
+            runCatching {
+                val raw = context.contentResolver.openInputStream(uri)?.bufferedReader()?.use { it.readText() }
+                    ?: throw IllegalStateException("Could not read selected file.")
+                JSONArray(raw)
+                parseTrades(raw)
+            }.onSuccess { imported -> trades = imported; error = "Backup restored. Cloud sync will update after restore." }
+                .onFailure { error = "Restore failed: choose a valid Profit-Loss JSON backup." }
+        }
+    }
     var cloudReady by remember(uid) { mutableStateOf(false) }
     LaunchedEffect(uid) {
         FirebaseFirestore.getInstance().collection("users").document(uid).get()
@@ -308,6 +342,17 @@ private fun MainScreen(uid: String, onSignOut: () -> Unit) {
                         item {
                             Text("Reports & balance", fontSize = 22.sp, fontWeight = FontWeight.Bold, color = Ink)
                             Text("Weekly report and all-time running total", color = Muted, fontSize = 13.sp)
+                        }
+                        item {
+                            Column(Modifier.fillMaxWidth().background(Color.White, RoundedCornerShape(18.dp)).padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                                Text("BACKUP & EXPORT", color = Blue, fontSize = 12.sp, fontWeight = FontWeight.ExtraBold)
+                                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                    OutlinedButton(onClick = { csvExportLauncher.launch("profit-loss-trades.csv") }, modifier = Modifier.weight(1f)) { Text("Export CSV", fontSize = 11.sp) }
+                                    OutlinedButton(onClick = { backupExportLauncher.launch("profit-loss-backup.json") }, modifier = Modifier.weight(1f)) { Text("Backup JSON", fontSize = 11.sp) }
+                                }
+                                OutlinedButton(onClick = { backupImportLauncher.launch(arrayOf("application/json", "text/json", "application/octet-stream")) }, modifier = Modifier.fillMaxWidth()) { Text("Restore JSON Backup") }
+                                if (error.isNotBlank()) Text(error, color = if (error.contains("failed", true)) Red else Green, fontSize = 11.sp)
+                            }
                         }
                         item {
                             Column(Modifier.fillMaxWidth().background(Brush.linearGradient(listOf(Purple, Color(0xFF9B65D6))), RoundedCornerShape(22.dp)).padding(20.dp)) {

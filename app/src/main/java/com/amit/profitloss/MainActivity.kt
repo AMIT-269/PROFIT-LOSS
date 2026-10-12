@@ -6,6 +6,9 @@ import android.content.Context
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.core.splashscreen.SplashScreen.Companion.installSplashScreen
+import com.google.firebase.FirebaseApp
+import com.google.firebase.auth.FirebaseAuth
+import com.google.firebase.firestore.FirebaseFirestore
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
@@ -19,6 +22,7 @@ import androidx.compose.material.icons.filled.CalendarMonth
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.History
+import androidx.compose.material.icons.filled.Logout
 import androidx.compose.material.icons.filled.Savings
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -68,15 +72,34 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         installSplashScreen()
         super.onCreate(savedInstanceState)
-        setContent { MainScreen() }
+        setContent { ProfitLossRoot() }
+    }
+}
+
+@Composable
+private fun ProfitLossRoot() {
+    val context = LocalContext.current
+    var signedInUid by remember { mutableStateOf(FirebaseApp.getApps(context).firstOrNull()?.let { FirebaseAuth.getInstance(it).currentUser?.uid }) }
+    if (FirebaseApp.getApps(context).isEmpty()) {
+        MaterialTheme(colorScheme = lightColorScheme(primary = Blue)) {
+            Column(Modifier.fillMaxSize().padding(24.dp), verticalArrangement = Arrangement.Center, horizontalAlignment = Alignment.CenterHorizontally) {
+                Text("Firebase setup required", fontSize = 22.sp, fontWeight = FontWeight.Bold, color = Navy)
+                Spacer(Modifier.height(10.dp))
+                Text("Add app/google-services.json from your Firebase project, then enable Phone Authentication and Cloud Firestore.", color = Muted)
+            }
+        }
+    } else if (signedInUid == null) {
+        PhoneLoginScreen(onSignedIn = { signedInUid = it })
+    } else {
+        MainScreen(uid = signedInUid!!, onSignOut = { FirebaseAuth.getInstance().signOut(); signedInUid = null })
     }
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun MainScreen() {
+private fun MainScreen(uid: String, onSignOut: () -> Unit) {
     val context = LocalContext.current
-    val prefs = remember { context.getSharedPreferences("trade_store", Context.MODE_PRIVATE) }
+    val prefs = remember(uid) { context.getSharedPreferences("trade_store_$uid", Context.MODE_PRIVATE) }
     var trades by remember { mutableStateOf(readTrades(prefs)) }
     var date by remember { mutableStateOf(LocalDate.now().format(iso)) }
     var tab by remember { mutableIntStateOf(0) }
@@ -86,7 +109,23 @@ private fun MainScreen() {
     var formDate by remember { mutableStateOf(date) }
     var editingId by remember { mutableStateOf<String?>(null) }
     var error by remember { mutableStateOf("") }
-    LaunchedEffect(trades) { writeTrades(prefs, trades) }
+    var cloudReady by remember(uid) { mutableStateOf(false) }
+    LaunchedEffect(uid) {
+        FirebaseFirestore.getInstance().collection("users").document(uid).get()
+            .addOnSuccessListener { document ->
+                if (document.exists()) trades = parseTrades(document.getString("tradesJson") ?: "[]")
+                cloudReady = true
+            }
+            .addOnFailureListener { error = "Cloud restore failed. Check internet and Firestore rules." }
+    }
+    LaunchedEffect(trades, cloudReady) {
+        writeTrades(prefs, trades)
+        if (cloudReady) {
+            FirebaseFirestore.getInstance().collection("users").document(uid)
+                .set(mapOf("tradesJson" to tradesToJson(trades)))
+                .addOnFailureListener { error = "Cloud backup failed. Your local data is still saved." }
+        }
+    }
 
     val todayTrades = trades.filter { it.date == date }.sortedBy { trades.indexOf(it) }
     val start = LocalDate.parse(date).with(TemporalAdjusters.previousOrSame(DayOfWeek.MONDAY))
@@ -112,7 +151,7 @@ private fun MainScreen() {
                         Text("PROFIT • LOSS", color = Color.White, fontSize = 21.sp, fontWeight = FontWeight.ExtraBold)
                         Text("TRADING REGISTER", color = Color(0xFFD7E3FF), fontSize = 11.sp, letterSpacing = 2.sp)
                     }
-                    Text("₹", color = Color.White, fontSize = 23.sp, fontWeight = FontWeight.Bold)
+                    IconButton(onClick = onSignOut) { Icon(Icons.Default.Logout, "Sign out", tint = Color.White) }
                 }
             },
             bottomBar = {
@@ -315,18 +354,24 @@ private fun MainScreen() {
 
 private fun signed(n: Double) = (if (n > 0) "+" else if (n < 0) "−" else "") + cash(abs(n))
 
-private fun readTrades(prefs: android.content.SharedPreferences): List<Trade> = runCatching {
-    val a = JSONArray(prefs.getString("trades", "[]"))
+private fun parseTrades(json: String): List<Trade> = runCatching {
+    val a = JSONArray(json)
     (0 until a.length()).map { i ->
         val o = a.getJSONObject(i)
         Trade(o.optString("id", UUID.randomUUID().toString()), o.getString("date"), o.optDouble("profit", 0.0), o.optDouble("loss", 0.0), o.optDouble("brokerage", 87.0))
     }
 }.getOrDefault(emptyList())
 
-private fun writeTrades(prefs: android.content.SharedPreferences, trades: List<Trade>) {
+private fun readTrades(prefs: android.content.SharedPreferences): List<Trade> = parseTrades(prefs.getString("trades", "[]") ?: "[]")
+
+private fun tradesToJson(trades: List<Trade>): String {
     val a = JSONArray()
     trades.forEach { a.put(JSONObject().put("id", it.id).put("date", it.date).put("profit", it.profit).put("loss", it.loss).put("brokerage", it.brokerage)) }
-    prefs.edit().putString("trades", a.toString()).apply()
+    return a.toString()
+}
+
+private fun writeTrades(prefs: android.content.SharedPreferences, trades: List<Trade>) {
+    prefs.edit().putString("trades", tradesToJson(trades)).apply()
 }
 
 @Composable

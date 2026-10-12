@@ -1,0 +1,28 @@
+{
+  "project_info": {
+    "project_number": "974622952720",
+    "project_id": "profit-loss-b2ece",
+    "storage_bucket": "profit-loss-b2ece.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:974622952720:android:533e0d1bd25feb9a642995",
+        "android_client_info": {
+          "package_name": "com.amit.profitloss"
+        }
+      },
+      "api_key": [
+        {
+          "current_key": "AIzaSyCUnoEdHMFrrV3aejPPPHHxudNrQPJtu1A"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

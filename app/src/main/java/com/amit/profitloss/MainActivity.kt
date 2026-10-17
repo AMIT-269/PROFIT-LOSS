@@ -131,6 +131,7 @@ private fun MainScreen(uid: String, onSignOut: () -> Unit) {
     var startingBalance by remember(uid) { mutableStateOf(prefs.getString("startingBalance", null)?.toDoubleOrNull()) }
     var balanceInput by remember(uid) { mutableStateOf(startingBalance?.toString() ?: "") }
     var balanceError by remember { mutableStateOf("") }
+    var editingStartingBalance by remember { mutableStateOf(false) }
     var withdrawals by remember(uid) { mutableStateOf(parseWithdrawals(prefs.getString("withdrawals", "[]") ?: "[]")) }
     var withdrawalAmount by remember { mutableStateOf("") }
     var withdrawalRemark by remember { mutableStateOf("") }
@@ -417,6 +418,32 @@ private fun MainScreen(uid: String, onSignOut: () -> Unit) {
                                     }
                                     Text("Original capital still invested: " + cash(remainingCapital), color = Blue, fontWeight = FontWeight.Bold, fontSize = 13.sp)
                                     Text("Trading profit/loss after brokerage: " + signed(allNet), color = if (allNet < 0) Red else Green, fontSize = 12.sp)
+                                    if (!editingStartingBalance) {
+                                        OutlinedButton(onClick = { balanceInput = startingBalance!!.toString(); editingStartingBalance = true; balanceError = "" }, modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(13.dp)) {
+                                            Icon(Icons.Default.Edit, null, modifier = Modifier.size(16.dp))
+                                            Spacer(Modifier.width(6.dp))
+                                            Text("EDIT STARTING BALANCE")
+                                        }
+                                    } else {
+                                        OutlinedTextField(
+                                            value = balanceInput,
+                                            onValueChange = { balanceInput = it.filter { ch -> ch.isDigit() || ch == '.' }; balanceError = "" },
+                                            modifier = Modifier.fillMaxWidth(),
+                                            label = { Text("Correct starting balance (₹)") },
+                                            singleLine = true,
+                                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                                            shape = RoundedCornerShape(13.dp)
+                                        )
+                                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                            Button(onClick = {
+                                                val amount = balanceInput.toDoubleOrNull()
+                                                if (amount == null || amount < 0) balanceError = "Enter a valid starting balance."
+                                                else { startingBalance = amount; editingStartingBalance = false; balanceError = "" }
+                                            }, modifier = Modifier.weight(1f), shape = RoundedCornerShape(13.dp)) { Text("SAVE CHANGES") }
+                                            OutlinedButton(onClick = { balanceInput = startingBalance!!.toString(); editingStartingBalance = false; balanceError = "" }, modifier = Modifier.weight(1f), shape = RoundedCornerShape(13.dp)) { Text("CANCEL") }
+                                        }
+                                        if (balanceError.isNotBlank()) Text(balanceError, color = Red, fontSize = 11.sp)
+                                    }
                                     Text("Profit remaining after withdrawals: " + signed(remainingProfit), color = Purple, fontSize = 12.sp)
                                     Text("Total withdrawn: " + cash(totalWithdrawn), color = Orange, fontWeight = FontWeight.SemiBold, fontSize = 12.sp)
                                     HorizontalDivider(color = Color(0xFFE8EAF1))

@@ -71,6 +71,20 @@ private fun profits(ts: List<Trade>) = ts.filter { it.net > 0 }.sumOf { it.net }
 private fun losses(ts: List<Trade>) = -ts.filter { it.net < 0 }.sumOf { it.net }
 private fun net(ts: List<Trade>) = ts.sumOf { it.net }
 
+data class Withdrawal(val id: String = UUID.randomUUID().toString(), val date: String, val amount: Double, val remark: String)
+private fun parseWithdrawals(json: String): List<Withdrawal> = runCatching {
+    val a = JSONArray(json)
+    (0 until a.length()).map { i ->
+        val o = a.getJSONObject(i)
+        Withdrawal(o.optString("id", UUID.randomUUID().toString()), o.getString("date"), o.optDouble("amount", 0.0), o.optString("remark", ""))
+    }
+}.getOrDefault(emptyList())
+private fun withdrawalsToJson(items: List<Withdrawal>): String {
+    val a = JSONArray()
+    items.forEach { a.put(JSONObject().put("id", it.id).put("date", it.date).put("amount", it.amount).put("remark", it.remark)) }
+    return a.toString()
+}
+
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         installSplashScreen()
@@ -117,6 +131,10 @@ private fun MainScreen(uid: String, onSignOut: () -> Unit) {
     var startingBalance by remember(uid) { mutableStateOf(prefs.getString("startingBalance", null)?.toDoubleOrNull()) }
     var balanceInput by remember(uid) { mutableStateOf(startingBalance?.toString() ?: "") }
     var balanceError by remember { mutableStateOf("") }
+    var withdrawals by remember(uid) { mutableStateOf(parseWithdrawals(prefs.getString("withdrawals", "[]") ?: "[]")) }
+    var withdrawalAmount by remember { mutableStateOf("") }
+    var withdrawalRemark by remember { mutableStateOf("") }
+    var withdrawalError by remember { mutableStateOf("") }
     var date by remember { mutableStateOf(LocalDate.now().format(iso)) }
     var tab by remember { mutableIntStateOf(0) }
     var profitInput by remember { mutableStateOf("") }
@@ -168,16 +186,19 @@ private fun MainScreen(uid: String, onSignOut: () -> Unit) {
                         startingBalance = cloudBalance
                         balanceInput = cloudBalance.toString()
                     }
+                    if (document.contains("withdrawalsJson")) {
+                        withdrawals = parseWithdrawals(document.getString("withdrawalsJson") ?: "[]")
+                    }
                 }
                 cloudReady = true
             }
             .addOnFailureListener { error = "Cloud restore failed. Check internet and Firestore rules." }
     }
-    LaunchedEffect(trades, startingBalance, cloudReady) {
+    LaunchedEffect(trades, startingBalance, withdrawals, cloudReady) {
         writeTrades(prefs, trades)
-        prefs.edit().putString("startingBalance", startingBalance?.toString()).apply()
+        prefs.edit().putString("startingBalance", startingBalance?.toString()).putString("withdrawals", withdrawalsToJson(withdrawals)).apply()
         if (cloudReady) {
-            val cloudData = mutableMapOf<String, Any>("tradesJson" to tradesToJson(trades))
+            val cloudData = mutableMapOf<String, Any>("tradesJson" to tradesToJson(trades), "withdrawalsJson" to withdrawalsToJson(withdrawals))
             if (startingBalance != null) cloudData["startingBalance"] = startingBalance!!
             FirebaseFirestore.getInstance().collection("users").document(uid)
                 .set(cloudData, SetOptions.merge())
@@ -379,17 +400,49 @@ private fun MainScreen(uid: String, onSignOut: () -> Unit) {
                                         Text("SAVE STARTING BALANCE", fontWeight = FontWeight.Bold)
                                     }
                                 } else {
+                                    val totalWithdrawn = withdrawals.sumOf { it.amount }
+                                    val remainingCapital = (startingBalance!! - totalWithdrawn).coerceAtLeast(0.0)
+                                    val profitWithdrawn = (totalWithdrawn - startingBalance!!).coerceAtLeast(0.0)
+                                    val remainingProfit = allNet - profitWithdrawn
+                                    val currentBalance = startingBalance!! + allNet - totalWithdrawn
                                     Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                                         Column(Modifier.weight(1f).background(Color(0xFFEAF0FF), RoundedCornerShape(14.dp)).padding(13.dp)) {
-                                            Text("STARTING BALANCE", color = Blue, fontSize = 10.sp, fontWeight = FontWeight.Bold)
-                                            Text(cash(startingBalance!!), color = Navy, fontSize = 20.sp, fontWeight = FontWeight.ExtraBold)
+                                            Text("STARTING CAPITAL", color = Blue, fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                                            Text(cash(startingBalance!!), color = Navy, fontSize = 19.sp, fontWeight = FontWeight.ExtraBold)
                                         }
-                                        Column(Modifier.weight(1f).background(if (startingBalance!! + allNet < startingBalance!!) Color(0xFFFFE9EC) else Color(0xFFE4F8EC), RoundedCornerShape(14.dp)).padding(13.dp)) {
-                                            Text("CURRENT BALANCE", color = if (startingBalance!! + allNet < startingBalance!!) Red else Green, fontSize = 10.sp, fontWeight = FontWeight.Bold)
-                                            Text(cash(startingBalance!! + allNet), color = if (startingBalance!! + allNet < startingBalance!!) Red else Green, fontSize = 20.sp, fontWeight = FontWeight.ExtraBold)
+                                        Column(Modifier.weight(1f).background(if (currentBalance < 0) Color(0xFFFFE9EC) else Color(0xFFE4F8EC), RoundedCornerShape(14.dp)).padding(13.dp)) {
+                                            Text("CURRENT BALANCE", color = if (currentBalance < 0) Red else Green, fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                                            Text(cash(currentBalance), color = if (currentBalance < 0) Red else Green, fontSize = 19.sp, fontWeight = FontWeight.ExtraBold)
                                         }
                                     }
-                                    Text("Overall trading result: " + signed(allNet) + " (profit/loss after brokerage)", color = Muted, fontSize = 12.sp)
+                                    Text("Original capital still invested: " + cash(remainingCapital), color = Blue, fontWeight = FontWeight.Bold, fontSize = 13.sp)
+                                    Text("Trading profit/loss after brokerage: " + signed(allNet), color = if (allNet < 0) Red else Green, fontSize = 12.sp)
+                                    Text("Profit remaining after withdrawals: " + signed(remainingProfit), color = Purple, fontSize = 12.sp)
+                                    Text("Total withdrawn: " + cash(totalWithdrawn), color = Orange, fontWeight = FontWeight.SemiBold, fontSize = 12.sp)
+                                    HorizontalDivider(color = Color(0xFFE8EAF1))
+                                    Text("WITHDRAW MONEY", color = Orange, fontSize = 12.sp, fontWeight = FontWeight.ExtraBold)
+                                    OutlinedTextField(value = withdrawalAmount, onValueChange = { withdrawalAmount = it.filter { ch -> ch.isDigit() || ch == '.' }; withdrawalError = "" }, modifier = Modifier.fillMaxWidth(), label = { Text("Withdrawal amount (₹)") }, singleLine = true, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal), shape = RoundedCornerShape(13.dp))
+                                    OutlinedTextField(value = withdrawalRemark, onValueChange = { withdrawalRemark = it; withdrawalError = "" }, modifier = Modifier.fillMaxWidth(), label = { Text("Remark (optional)") }, placeholder = { Text("e.g. Personal use") }, singleLine = true, shape = RoundedCornerShape(13.dp))
+                                    Button(onClick = {
+                                        val amount = withdrawalAmount.toDoubleOrNull()
+                                        if (amount == null || amount <= 0.0) withdrawalError = "Enter a withdrawal amount greater than zero."
+                                        else {
+                                            withdrawals = withdrawals + Withdrawal(date = LocalDate.now().format(iso), amount = amount, remark = withdrawalRemark.trim())
+                                            withdrawalAmount = ""; withdrawalRemark = ""; withdrawalError = ""
+                                        }
+                                    }, modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(13.dp), colors = ButtonDefaults.buttonColors(containerColor = Orange)) { Text("SAVE WITHDRAWAL", fontWeight = FontWeight.Bold) }
+                                    if (withdrawalError.isNotBlank()) Text(withdrawalError, color = Red, fontSize = 11.sp)
+                                    Text("WITHDRAWAL HISTORY", color = Muted, fontSize = 11.sp, fontWeight = FontWeight.ExtraBold)
+                                    if (withdrawals.isEmpty()) Text("No withdrawals recorded yet.", color = Muted, fontSize = 12.sp)
+                                    withdrawals.sortedByDescending { it.date }.forEach { w ->
+                                        Row(Modifier.fillMaxWidth().background(Color(0xFFFFF5E9), RoundedCornerShape(12.dp)).padding(11.dp), verticalAlignment = Alignment.CenterVertically) {
+                                            Column(Modifier.weight(1f)) {
+                                                Text(showDate(w.date) + if (w.remark.isBlank()) "" else " • " + w.remark, color = Ink, fontWeight = FontWeight.SemiBold, fontSize = 12.sp)
+                                                Text("Withdrawal", color = Muted, fontSize = 10.sp)
+                                            }
+                                            Text("−" + cash(w.amount), color = Red, fontWeight = FontWeight.ExtraBold, fontSize = 14.sp)
+                                        }
+                                    }
                                 }
                                 if (balanceError.isNotBlank()) Text(balanceError, color = Red, fontSize = 11.sp)
                             }

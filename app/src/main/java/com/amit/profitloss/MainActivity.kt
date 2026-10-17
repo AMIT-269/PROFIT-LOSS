@@ -11,6 +11,7 @@ import androidx.core.splashscreen.SplashScreen.Companion.installSplashScreen
 import com.google.firebase.FirebaseApp
 import com.google.firebase.auth.FirebaseAuth
 import com.google.firebase.firestore.FirebaseFirestore
+import com.google.firebase.firestore.SetOptions
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
@@ -113,6 +114,9 @@ private fun MainScreen(uid: String, onSignOut: () -> Unit) {
         accountPrefs
     }
     var trades by remember { mutableStateOf(readTrades(prefs)) }
+    var startingBalance by remember(uid) { mutableStateOf(prefs.getString("startingBalance", null)?.toDoubleOrNull()) }
+    var balanceInput by remember(uid) { mutableStateOf(startingBalance?.toString() ?: "") }
+    var balanceError by remember { mutableStateOf("") }
     var date by remember { mutableStateOf(LocalDate.now().format(iso)) }
     var tab by remember { mutableIntStateOf(0) }
     var profitInput by remember { mutableStateOf("") }
@@ -157,16 +161,26 @@ private fun MainScreen(uid: String, onSignOut: () -> Unit) {
     LaunchedEffect(uid) {
         FirebaseFirestore.getInstance().collection("users").document(uid).get()
             .addOnSuccessListener { document ->
-                if (document.exists()) trades = parseTrades(document.getString("tradesJson") ?: "[]")
+                if (document.exists()) {
+                    trades = parseTrades(document.getString("tradesJson") ?: "[]")
+                    val cloudBalance = document.get("startingBalance")?.toString()?.toDoubleOrNull()
+                    if (cloudBalance != null) {
+                        startingBalance = cloudBalance
+                        balanceInput = cloudBalance.toString()
+                    }
+                }
                 cloudReady = true
             }
             .addOnFailureListener { error = "Cloud restore failed. Check internet and Firestore rules." }
     }
-    LaunchedEffect(trades, cloudReady) {
+    LaunchedEffect(trades, startingBalance, cloudReady) {
         writeTrades(prefs, trades)
+        prefs.edit().putString("startingBalance", startingBalance?.toString()).apply()
         if (cloudReady) {
+            val cloudData = mutableMapOf<String, Any>("tradesJson" to tradesToJson(trades))
+            if (startingBalance != null) cloudData["startingBalance"] = startingBalance!!
             FirebaseFirestore.getInstance().collection("users").document(uid)
-                .set(mapOf("tradesJson" to tradesToJson(trades)))
+                .set(cloudData, SetOptions.merge())
                 .addOnFailureListener { error = "Cloud backup failed. Your local data is still saved." }
         }
     }
@@ -344,6 +358,43 @@ private fun MainScreen(uid: String, onSignOut: () -> Unit) {
                             Text("Weekly report and all-time running total", color = Muted, fontSize = 13.sp)
                         }
                         item {
+                            Column(Modifier.fillMaxWidth().background(Color.White, RoundedCornerShape(20.dp)).padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                                Text("MAIN BALANCE", color = Blue, fontSize = 12.sp, fontWeight = FontWeight.ExtraBold, letterSpacing = 1.sp)
+                                if (startingBalance == null) {
+                                    Text("Enter your balance before your first trade. This starting amount is saved to your account.", color = Muted, fontSize = 12.sp)
+                                    OutlinedTextField(
+                                        value = balanceInput,
+                                        onValueChange = { balanceInput = it.filter { ch -> ch.isDigit() || ch == '.' }; balanceError = "" },
+                                        modifier = Modifier.fillMaxWidth(),
+                                        label = { Text("Starting balance (₹)") },
+                                        singleLine = true,
+                                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                                        shape = RoundedCornerShape(13.dp)
+                                    )
+                                    Button(onClick = {
+                                        val amount = balanceInput.toDoubleOrNull()
+                                        if (amount == null || amount < 0) balanceError = "Enter a valid starting balance."
+                                        else { startingBalance = amount; balanceError = "" }
+                                    }, modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(13.dp)) {
+                                        Text("SAVE STARTING BALANCE", fontWeight = FontWeight.Bold)
+                                    }
+                                } else {
+                                    Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                                        Column(Modifier.weight(1f).background(Color(0xFFEAF0FF), RoundedCornerShape(14.dp)).padding(13.dp)) {
+                                            Text("STARTING BALANCE", color = Blue, fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                                            Text(cash(startingBalance!!), color = Navy, fontSize = 20.sp, fontWeight = FontWeight.ExtraBold)
+                                        }
+                                        Column(Modifier.weight(1f).background(if (startingBalance!! + allNet < startingBalance!!) Color(0xFFFFE9EC) else Color(0xFFE4F8EC), RoundedCornerShape(14.dp)).padding(13.dp)) {
+                                            Text("CURRENT BALANCE", color = if (startingBalance!! + allNet < startingBalance!!) Red else Green, fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                                            Text(cash(startingBalance!! + allNet), color = if (startingBalance!! + allNet < startingBalance!!) Red else Green, fontSize = 20.sp, fontWeight = FontWeight.ExtraBold)
+                                        }
+                                    }
+                                    Text("Overall trading result: " + signed(allNet) + " (profit/loss after brokerage)", color = Muted, fontSize = 12.sp)
+                                }
+                                if (balanceError.isNotBlank()) Text(balanceError, color = Red, fontSize = 11.sp)
+                            }
+                        }
+                        item {
                             Column(Modifier.fillMaxWidth().background(Color.White, RoundedCornerShape(18.dp)).padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                                 Text("BACKUP & EXPORT", color = Blue, fontSize = 12.sp, fontWeight = FontWeight.ExtraBold)
                                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -356,7 +407,7 @@ private fun MainScreen(uid: String, onSignOut: () -> Unit) {
                         }
                         item {
                             Column(Modifier.fillMaxWidth().background(Brush.linearGradient(listOf(Purple, Color(0xFF9B65D6))), RoundedCornerShape(22.dp)).padding(20.dp)) {
-                                Text("ALL-TIME RUNNING BALANCE", color = Color.White.copy(alpha = .85f), fontSize = 11.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.sp)
+                                Text("ALL-TIME NET PROFIT / LOSS", color = Color.White.copy(alpha = .85f), fontSize = 11.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.sp)
                                 Text(signed(allNet), color = Color.White, fontSize = 32.sp, fontWeight = FontWeight.ExtraBold)
                                 Text("All saved days combined", color = Color.White.copy(alpha = .85f), fontSize = 12.sp)
                             }
